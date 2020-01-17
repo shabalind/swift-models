@@ -41,6 +41,7 @@ let package = Package(
         .target(name: "Datasets", dependencies: ["ModelSupport", "Batcher"], path: "Datasets"),
         .target(name: "ModelSupport", dependencies: ["SwiftProtobuf"], path: "Support"),
         .target(name: "ImageClassificationModels", path: "Models/ImageClassification"),
+        .target(name: "SSD", path: "SSD"),
         .target(name: "TextModels", dependencies: ["Datasets"], path: "Models/Text"),
         .target(name: "RecommendationModels", path: "Models/Recommendation"),
         .target(
