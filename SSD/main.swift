@@ -13,12 +13,13 @@
 // limitations under the License.
 
 import TensorFlow
+import Batcher
 
 /// A labeled example (or batch thereof) for object detection with SSD.
 ///
 /// For now, we leave most of the work to existing Python code and run the Swift model off a dataset
 /// that has already undergone dataset augmentation and had its target boxes matched to anchors.
-public struct LabeledSsdExample: TensorGroup {
+public struct LabeledSsdExample {
     /// The transformed image's pixel data, shape [batchSize, height, width, 3].
     // TODO: To which numeric range are the pixel values normalized?
     public var image: Tensor<Float>
@@ -39,43 +40,50 @@ public struct LabeledSsdExample: TensorGroup {
     public var boxLabels: Tensor<Float>
 }
 
+/// For use with Batcher.
+extension LabeledSsdExample: Collatable {
+    public init(collating: [Self]) {
+	// Collate component-wise.
+	self.image = Tensor<Float>(collating: collating.map { x in x.image } )
+	self.clsLabels = Tensor<Int32>(collating: collating.map { x in x.clsLabels } )
+	self.boxLabels = Tensor<Float>(collating: collating.map { x in x.boxLabels } )
+    }
+}
+
 /// A dataset for object detection with SSD.
-public protocol ObjectDetectionDataset {
+public protocol ObjectDetectionBatchers {
+    associatedtype C: Collection  where C.Index == Int  // Batcher's requirement.
     init()
-    var trainingDataset: Dataset<LabeledSsdExample> { get }
-    var testDataset: Dataset<LabeledSsdExample> { get }
-    var trainingExampleCount: Int { get }
-    var testExampleCount: Int { get }
+    var training: Batcher<C> { get }
+    var test: Batcher<C> { get }
 }
 
 let batchSize = 8
 
 /// A dummy dataset that is merely good enough to compile.
-struct DummyDataset: ObjectDetectionDataset {
+struct DummyBatchers: ObjectDetectionBatchers {
     /// The training part of this dataset.
-    public let trainingDataset: Dataset<LabeledSsdExample>
+    public let training: Batcher<[LabeledSsdExample]>
 
     /// The test part of this dataset.
-    public let testDataset: Dataset<LabeledSsdExample>
-
-    /// The number of training examples.
-    public let trainingExampleCount = 1
-
-    /// The number of test examples.
-    public let testExampleCount = 1
+    public let test: Batcher<[LabeledSsdExample]>
 
     init() {
-        let dummyExamples = LabeledSsdExample(
-            image: Tensor<Float>(repeating: -0.123, shape: [3 * batchSize, 224, 224, 3]),
-            clsLabels: Tensor<Int32>(repeating: -1, shape: [3 * batchSize, 64 + 16 + 4, 1]),
-            boxLabels: Tensor<Float>(repeating: -1, shape: [3 * batchSize, 64 + 16 + 4, 4])
-        )
-        trainingDataset = Dataset<LabeledSsdExample>(elements: dummyExamples)
-        testDataset = Dataset<LabeledSsdExample>(elements: dummyExamples)
+	var basicDataset = [LabeledSsdExample]()
+	for _ in 0..<3 {
+	    basicDataset += [
+		LabeledSsdExample(
+                    image: Tensor<Float>(repeating: -0.123, shape: [224, 224, 3]),
+		    clsLabels: Tensor<Int32>(repeating: 2, shape: [64 + 16 + 4, 1]),
+		    boxLabels: Tensor<Float>(repeating: 0.1, shape: [64 + 16 + 4, 4]))
+	    ]
+	}
+        training = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1, shuffle: true)
+        test = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1)
     }
 }
 
-let dataset = DummyDataset()  // We'd rather have COCO.
+let batchers = DummyBatchers()  // We'd rather have COCO.
 
 /// The output of SSDModel.
 //
@@ -359,10 +367,13 @@ func detectionLoss(
     let loss = clsOutputs[0, 0, 0] + boxOutputs[0, 0, 0]  // Some scalar that depends on inputs.
     print("Computed loss \(loss)")
     return loss
+
     // error: expression is not differentiable: meanSquaredError(...)
     //return (
-    //	meanSquaredError(predicted: boxOutputs, expected: boxLabels) +
-    //	softmaxCrossEntropy(logits: clsOutputs, labels: clsLabels))
+        //meanSquaredError(predicted: boxOutputs, expected: boxLabels)
+        //+
+        //softmaxCrossEntropy(logits: clsOutputs, labels: clsLabels)
+    //)
 }
 
 // TODO: Add learning rate schedule (ramp-up and decay).
@@ -372,10 +383,8 @@ print("Starting training...")
 
 for epoch in 1...10 {
     Context.local.learningPhase = .training
-    let trainingData = dataset.trainingDataset.shuffled(
-        sampleCount: dataset.trainingExampleCount, randomSeed: Int64(epoch))
     var lastLoss: Float = 0
-    for batch in trainingData.batched(batchSize) {
+    for batch in batchers.training.sequenced() {
         let (image, boxLabels, clsLabels) = (batch.image, batch.boxLabels, batch.clsLabels)
         let (loss, grad) = valueWithGradient(at: model) { model -> Tensor<Float> in
             let modelOutput = model(image)
