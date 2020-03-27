@@ -74,7 +74,7 @@ struct DummyBatchers: ObjectDetectionBatchers {
 	    basicDataset += [
 		LabeledSsdExample(
                     image: Tensor<Float>(repeating: -0.123, shape: [300, 300, 3]),
-		    clsLabels: Tensor<Int32>(repeating: 2, shape: [8732, 1]),
+		    clsLabels: Tensor<Int32>(repeating: 2, shape: [8732]),
 		    boxLabels: Tensor<Float>(repeating: 0.1, shape: [8732, 4]))
 	    ]
 	}
@@ -348,12 +348,6 @@ struct SSDModel: Layer {
 		with: boxOutputs5.reshaped(to: [boxOutputs5.shape[0], -1, 4]),
 		alongAxis: 1)
 	)
-	print(boxOutputs0.shape)
-	print(boxOutputs1.shape)
-	print(boxOutputs2.shape)
-	print(boxOutputs3.shape)
-	print(boxOutputs4.shape)
-	print(boxOutputs5.shape)
         return SSDModelOutput(clsOutputs: clsOutputs, boxOutputs: boxOutputs)
     }
 }
@@ -368,13 +362,11 @@ func detectionLoss(
     clsLabels: Tensor<Int32>,
     boxLabels: Tensor<Float>
 ) -> Tensor<Float> {
-    print("predicted:", boxOutputs.shape, "expected:", boxLabels.shape)
     return (
-        meanSquaredError(predicted: boxOutputs, expected: boxLabels)
-        +
+        meanSquaredError(predicted: boxOutputs, expected: boxLabels) +
         softmaxCrossEntropy(
-	    logits: clsOutputs.reshaped(to:[-1, clsOutputs.shape[-1]]),
-	    labels: clsLabels.reshaped(to:[-1, clsOutputs.shape[-1]]))
+	    logits: clsOutputs.reshaped(to:[-1, clsOutputs.shape[2]]),
+	    labels: clsLabels.reshaped(to:[-1]))
     )
 }
 
