@@ -73,9 +73,9 @@ struct DummyBatchers: ObjectDetectionBatchers {
 	for _ in 0..<3 {
 	    basicDataset += [
 		LabeledSsdExample(
-                    image: Tensor<Float>(repeating: -0.123, shape: [224, 224, 3]),
-		    clsLabels: Tensor<Int32>(repeating: 2, shape: [64 + 16 + 4, 1]),
-		    boxLabels: Tensor<Float>(repeating: 0.1, shape: [64 + 16 + 4, 4]))
+                    image: Tensor<Float>(repeating: -0.123, shape: [300, 300, 3]),
+		    clsLabels: Tensor<Int32>(repeating: 2, shape: [8732, 1]),
+		    boxLabels: Tensor<Float>(repeating: 0.1, shape: [8732, 4]))
 	    ]
 	}
         training = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1, shuffle: true)
@@ -348,7 +348,12 @@ struct SSDModel: Layer {
 		with: boxOutputs5.reshaped(to: [boxOutputs5.shape[0], -1, 4]),
 		alongAxis: 1)
 	)
-	
+	print(boxOutputs0.shape)
+	print(boxOutputs1.shape)
+	print(boxOutputs2.shape)
+	print(boxOutputs3.shape)
+	print(boxOutputs4.shape)
+	print(boxOutputs5.shape)
         return SSDModelOutput(clsOutputs: clsOutputs, boxOutputs: boxOutputs)
     }
 }
@@ -356,24 +361,21 @@ struct SSDModel: Layer {
 // TODO: Warm-start from a backbone checkpoint.
 var model = SSDModel(numClasses: 10)
 
-@differentiable
+@differentiable(wrt: (clsOutputs, boxOutputs))
 func detectionLoss(
     clsOutputs: Tensor<Float>,
     boxOutputs: Tensor<Float>,
     clsLabels: Tensor<Int32>,
     boxLabels: Tensor<Float>
 ) -> Tensor<Float> {
-    // TODO: Implement this for real.
-    let loss = clsOutputs[0, 0, 0] + boxOutputs[0, 0, 0]  // Some scalar that depends on inputs.
-    print("Computed loss \(loss)")
-    return loss
-
-    // error: expression is not differentiable: meanSquaredError(...)
-    //return (
-        //meanSquaredError(predicted: boxOutputs, expected: boxLabels)
-        //+
-        //softmaxCrossEntropy(logits: clsOutputs, labels: clsLabels)
-    //)
+    print("predicted:", boxOutputs.shape, "expected:", boxLabels.shape)
+    return (
+        meanSquaredError(predicted: boxOutputs, expected: boxLabels)
+        +
+        softmaxCrossEntropy(
+	    logits: clsOutputs.reshaped(to:[-1, clsOutputs.shape[-1]]),
+	    labels: clsLabels.reshaped(to:[-1, clsOutputs.shape[-1]]))
+    )
 }
 
 // TODO: Add learning rate schedule (ramp-up and decay).
