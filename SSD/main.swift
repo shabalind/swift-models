@@ -24,7 +24,7 @@ public struct LabeledSsdExample {
     // TODO: To which numeric range are the pixel values normalized?
     public var image: Tensor<Float>
 
-    /// The target class for each anchor box, shape [batchSize, numAnchors, 1].
+    /// The target class for each anchor box, shape [batchSize, numAnchors].
     ///
     /// Most boxes are unused and receive label -1.
     /// For the others, the value is in range 0..<numClasses.
@@ -83,7 +83,44 @@ struct DummyBatchers: ObjectDetectionBatchers {
     }
 }
 
-let batchers = DummyBatchers()  // We'd rather have COCO.
+// A dummy dataset that goes through label conversion.
+struct BatchersFromDummyLabels: ObjectDetectionBatchers {
+    /// The training part of this dataset.
+    public let training: Batcher<[LabeledSsdExample]>
+
+    /// The test part of this dataset.
+    public let test: Batcher<[LabeledSsdExample]>
+
+    init() {
+	let dummyImage = Tensor<Float>(repeating: -0.123, shape: [300, 300, 3])
+	let dummyLabeledBoundingBoxes = [
+	    LabeledBoundingBox(
+		xMin: 0.3, xMax: 0.5, 
+		yMin: 0.4, yMax: 0.6, 
+		className: "cat", classId: 42,
+		isCrowd: 0, area: 0.04),
+	    LabeledBoundingBox(
+		xMin: 0.6, xMax: 0.7, 
+		yMin: 0.6, yMax: 0.8, 
+		className: "dog", classId: 105,
+		isCrowd: 0, area: 0.02)
+	]
+	let (dummyClsLabels, dummyBoxLabels) = getSsdTargets(inputBoxes: dummyLabeledBoundingBoxes)
+	var basicDataset = [LabeledSsdExample]()
+	for _ in 0..<3 {
+	    basicDataset += [
+		LabeledSsdExample(
+                    image: dummyImage,
+		    clsLabels: dummyClsLabels,
+		    boxLabels: dummyBoxLabels)
+	    ]
+	}
+        training = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1, shuffle: true)
+        test = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1)
+    }
+}
+
+let batchers = BatchersFromDummyLabels()  // We'd rather have COCO.
 
 /// The output of SSDModel.
 //
@@ -362,12 +399,36 @@ func detectionLoss(
     clsLabels: Tensor<Int32>,
     boxLabels: Tensor<Float>
 ) -> Tensor<Float> {
-    return (
-        meanSquaredError(predicted: boxOutputs, expected: boxLabels) +
-        softmaxCrossEntropy(
-	    logits: clsOutputs.reshaped(to:[-1, clsOutputs.shape[2]]),
-	    labels: clsLabels.reshaped(to:[-1]))
-    )
+    let numClasses = clsOutputs.shape[2]
+
+    // Boxes with negative clsLabels are masked out when aggregting the losses.
+    // But before that, they need a valid class label to not crash its one-hot encoding.
+    let mask: Tensor<Bool> = clsLabels .>= Tensor<Int32>(0)
+    assert(mask.rank == 2)
+    let clsLabelsValid = Tensor<Int32>(zerosLike: clsLabels).replacing(with: clsLabels, where: mask)
+
+    // softmaxCrossEntropy() requires logits of rank 2, so we collapse the batchSize and numAnchors
+    // dimensions.
+    @differentiable
+    func maskedMean1d(_ value: Tensor<Float>) -> Tensor<Float> {
+	assert(value.rank == 1)
+	return (value * Tensor<Float>(mask.reshaped(to:[-1]))).mean()
+    }
+    let clsLoss = softmaxCrossEntropy(
+	logits: clsOutputs.reshaped(to:[-1, numClasses]),
+	labels: clsLabelsValid.reshaped(to:[-1]),
+	reduction: maskedMean1d)
+
+    // The l2Loss() of the boxes operates on shape [batchSize, numAnchors, 4], which requires
+    // broadcasting the mask.
+    @differentiable
+    func maskedMean3d(_ value: Tensor<Float>) -> Tensor<Float> {
+	assert(value.rank == 3)
+	return (value * Tensor<Float>(mask.expandingShape(at:2))).mean()
+    }
+    let boxLoss = l2Loss(predicted: boxOutputs, expected: boxLabels, reduction: maskedMean3d)
+
+    return clsLoss + boxLoss
 }
 
 // TODO: Add learning rate schedule (ramp-up and decay).
