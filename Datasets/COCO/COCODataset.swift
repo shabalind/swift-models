@@ -39,7 +39,7 @@ public struct COCODataset: ObjectDetectionDataset {
     }
 }
 
-func loadCOCOExamples(from coco: COCO, includeMasks: Bool, batchSize: Int, numWorkers: Int)
+public func loadCOCOExamples(from coco: COCO, includeMasks: Bool, batchSize: Int, numWorkers: Int)
     -> [ObjectDetectionExample]
 {
     let images = coco.metadata["images"] as! [COCO.Image]

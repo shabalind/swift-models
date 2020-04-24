@@ -12,38 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import Datasets
 import TensorFlow
 
-// TODO: Get this from the COCO code.
-public struct LabeledBoundingBox {
-    let xMin: Float
-    let xMax: Float
-    let yMin: Float
-    let yMax: Float
-    let className: String
-    let classId: Int
-    let isCrowd: Int 
-    let area: Float
-
-    init(xMin x0: Float, xMax x1: Float, 
-         yMin y0: Float, yMax y1: Float,
-         className: String, classId: Int,
-         isCrowd: Int, area: Float) {
-       self.xMin = x0
-       self.xMax = x1
-       self.yMin = y0
-       self.yMax = y1
-       self.className = className
-       self.classId = classId
-       self.isCrowd = isCrowd
-       self.area = area
-    }
-}
-
-/// Converts LabeledBoundingBoxes for one image into class and box targets for each SSD anchor box.
+/// Converts LabeledObjectes for one image into class and box targets for each SSD anchor box.
 ///
 /// - Parameters:
-///     - boxLabels: The LabeledBoundingBoxes for one image.
+///     - boxLabels: The LabeledObjectes for one image.
 ///
 /// - Returns:
 ///     - clsLabels: A Tensor<Int32> of shape [numAnchors, 1] with the prediction targets for each
@@ -62,7 +37,7 @@ public struct LabeledBoundingBox {
 ///        center, width and height respectively.
 ///        The scale factors are hyperparameters to help shape the loss function.
 ///        For details, see http://arxiv.org/abs/1506.01497 and Python class FasterRcnnBoxCoder.
-public func getSsdTargets(inputBoxes: [LabeledBoundingBox])
+public func getSsdTargets(inputBoxes: [LabeledObject])
 -> (clsLabels: Tensor<Int32>, boxLabels: Tensor<Float>) {
     let anchors = getDefaultBoxes()
     let matches = match(anchors: anchors, targets: inputBoxes)
@@ -160,7 +135,7 @@ func getDefaultBoxes() -> [Box] {
 }
 
 
-/// Read-only access to box coordinates. Lets us treat Box and LabeledBoundingBox uniformly.
+/// Read-only access to box coordinates. Lets us treat Box and LabeledObject uniformly.
 protocol ConstantBox {
     var xMin: Float { get }
     var xMax: Float { get }
@@ -168,7 +143,7 @@ protocol ConstantBox {
     var yMax: Float { get }
 }
 
-extension LabeledBoundingBox: ConstantBox {}
+extension LabeledObject: ConstantBox {}
 extension Box: ConstantBox {}
 
 

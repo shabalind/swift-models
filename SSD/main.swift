@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import Datasets
 import TensorFlow
 import Batcher
 
@@ -93,19 +94,19 @@ struct BatchersFromDummyLabels: ObjectDetectionBatchers {
 
     init() {
 	let dummyImage = Tensor<Float>(repeating: -0.123, shape: [300, 300, 3])
-	let dummyLabeledBoundingBoxes = [
-	    LabeledBoundingBox(
+	let dummyLabeledObjectes = [
+	    LabeledObject(
 		xMin: 0.3, xMax: 0.5, 
 		yMin: 0.4, yMax: 0.6, 
 		className: "cat", classId: 42,
-		isCrowd: 0, area: 0.04),
-	    LabeledBoundingBox(
+		isCrowd: 0, area: 0.04, maskRLE: nil),
+	    LabeledObject(
 		xMin: 0.6, xMax: 0.7, 
 		yMin: 0.6, yMax: 0.8, 
 		className: "dog", classId: 105,
-		isCrowd: 0, area: 0.02)
+		isCrowd: 0, area: 0.02, maskRLE: nil)
 	]
-	let (dummyClsLabels, dummyBoxLabels) = getSsdTargets(inputBoxes: dummyLabeledBoundingBoxes)
+	let (dummyClsLabels, dummyBoxLabels) = getSsdTargets(inputBoxes: dummyLabeledObjectes)
 	var basicDataset = [LabeledSsdExample]()
 	for _ in 0..<3 {
 	    basicDataset += [
@@ -120,7 +121,47 @@ struct BatchersFromDummyLabels: ObjectDetectionBatchers {
     }
 }
 
-let batchers = BatchersFromDummyLabels()  // We'd rather have COCO.
+struct CocoObjectDetectionBatchers: ObjectDetectionBatchers {
+    /// The training part of this dataset.
+    public let training: Batcher<[LabeledSsdExample]>
+
+    /// The test part of this dataset.
+    public let test: Batcher<[LabeledSsdExample]>
+
+    init() {
+	let includeMasks = false
+	let batchSizeLoad = 16
+	let numWorkersLoad = 8
+	let rawTestData = loadCOCOExamples(
+            from: COCOVariant.loadVal(downloadImages: true),
+            includeMasks: includeMasks,
+            batchSize: batchSizeLoad,
+  	    numWorkers: numWorkersLoad)
+	// *** BAD BAD BAD *** Until this is fast enough, we make use of tiny bits of data.
+	let testData = convertToSsd(Array(rawTestData[0..<16]))
+	let trainingData = convertToSsd(Array(rawTestData[16..<48]))
+        self.test = Batcher(on: testData, batchSize: batchSize, numWorkers: 1)
+	//let trainingData = convertToSsd(Array(loadCOCOExamples(
+        //    from: COCOVariant.loadTrain(downloadImages: true),
+        //    includeMasks: includeMasks,
+        //    batchSize: batchSizeLoad,
+        //    numWorkers: numWorkersLoad)[0..<limit]))
+        self.training = Batcher(
+	    on: trainingData,
+	    batchSize: batchSize, numWorkers: 1, shuffle: true)
+    }
+}
+
+func convertToSsd(_ examples: [ObjectDetectionExample]) -> [LabeledSsdExample] {
+	return examples.concurrentMap(nthreads: 8) { example in
+            let image = resize(images:example.image.tensor()!, size:(300, 300))
+	    let (clsLabels, boxLabels) = getSsdTargets(inputBoxes: example.objects)
+	    return LabeledSsdExample(
+                image: image,
+		clsLabels: clsLabels,
+		boxLabels: boxLabels)
+	}
+}
 
 /// The output of SSDModel.
 //
@@ -434,9 +475,11 @@ func detectionLoss(
 // TODO: Add learning rate schedule (ramp-up and decay).
 let optimizer = SGD(for: model, learningRate: 0.001, momentum: 0.9)
 
-print("Starting training...")
+print("Setting up data...")
+let batchers = CocoObjectDetectionBatchers()
 
-for epoch in 1...10 {
+print("Starting training...")
+for epoch in 1...5 {
     Context.local.learningPhase = .training
     var lastLoss: Float = 0
     for batch in batchers.training.sequenced() {
