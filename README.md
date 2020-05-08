@@ -2,10 +2,9 @@
 
 This repository contains TensorFlow models written in Swift.
 
-Use the ```tensorflow-xx``` branch that corresponds to the release you are using from [Swift for TensorFlow releases](https://github.com/tensorflow/swift/blob/master/Installation.md#releases).  For example, for the 0.6 release, use the ```tensorflow-0.6``` branch.
+Active development occurs on the `master` branch.
 
-Actual development occurs on the `master` branch.
-As new packages are released, `master` is pushed to `stable`.
+Use the ```tensorflow-xx``` branch that corresponds to the release you are using from [Swift for TensorFlow releases](https://github.com/tensorflow/swift/blob/master/Installation.md#releases).  For example, for the 0.6 release, use the ```tensorflow-0.6``` branch.
 
 For general information about Swift for TensorFlow development, please visit
 [tensorflow/swift](https://github.com/tensorflow/swift).
@@ -95,9 +94,9 @@ set DEVELOPER_LIBRARY_DIR=%SystemDrive%/Library/Developer/Platforms/Windows.plat
   -G Ninja                                                                                                                                                                                                                                            ^
   -S %SystemDrive%/SourceCache/tensorflow-swift-models
 : Build
-"%ProgramFiles%\CMake\bin\cmake.exe" --build %SystemDrive%/BinaryCache/tensorflow-swift-apis
+"%ProgramFiles%\CMake\bin\cmake.exe" --build %SystemDrive%/BinaryCache/tensorflow-swift-models
 : Test
-"%ProgramFiles%\CMake\bin\cmake.exe" --build %SystemDrive%/BinaryCache/tensorflow-swift-apis --target test
+"%ProgramFiles%\CMake\bin\cmake.exe" --build %SystemDrive%/BinaryCache/tensorflow-swift-models --target test
 ```
 
 ## Bugs
