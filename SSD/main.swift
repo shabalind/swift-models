@@ -41,13 +41,20 @@ public struct LabeledSsdExample {
     public var boxLabels: Tensor<Float>
 }
 
-/// For use with Batcher.
+/// For use with the new standard Collatable on 0.9.
 extension LabeledSsdExample: Collatable {
-    public init(collating: [Self]) {
+    public init<BatchSamples: Collection>(collating: BatchSamples)
+    where BatchSamples.Element == Self {
 	// Collate component-wise.
 	self.image = Tensor<Float>(collating: collating.map { x in x.image } )
 	self.clsLabels = Tensor<Int32>(collating: collating.map { x in x.clsLabels } )
 	self.boxLabels = Tensor<Float>(collating: collating.map { x in x.boxLabels } )
+    }
+}
+/// For use with Batcher and its old _Colltable.
+extension LabeledSsdExample: _Collatable {
+    public init(oldCollating: [Self]) {
+	self.init(collating: oldCollating)
     }
 }
 
@@ -153,7 +160,8 @@ struct CocoObjectDetectionBatchers: ObjectDetectionBatchers {
 }
 
 func convertToSsd(_ examples: [ObjectDetectionExample]) -> [LabeledSsdExample] {
-	return examples.concurrentMap(nthreads: 8) { example in
+       // TOOD: Before 0.9, I could use .concurrentMap(nthreads: 8) from batcher backend here.
+       return examples.map { example in
             let image = resize(images:example.image.tensor()!, size:(300, 300))
 	    let (clsLabels, boxLabels) = getSsdTargets(inputBoxes: example.objects)
 	    return LabeledSsdExample(
