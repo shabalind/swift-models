@@ -14,12 +14,11 @@
 
 import Datasets
 import TensorFlow
-import Batcher
 
 /// A labeled example (or batch thereof) for object detection with SSD.
 ///
-/// For now, we leave most of the work to existing Python code and run the Swift model off a dataset
-/// that has already undergone dataset augmentation and had its target boxes matched to anchors.
+/// When represented with this class, the random distortion for dataset augmentation has already
+/// happened, and class and box labels for each SSD anchor box have been computed.
 public struct LabeledSsdExample {
     /// The transformed image's pixel data, shape [batchSize, height, width, 3].
     // TODO: To which numeric range are the pixel values normalized?
@@ -30,18 +29,16 @@ public struct LabeledSsdExample {
     /// Most boxes are unused and receive label -1.
     /// For the others, the value is in range 0..<numClasses.
     //
-    // TODO: In which order are the anchor boxes listed?
+    // TODO: Document the order achieved by getSsdTargets().
     public var clsLabels: Tensor<Int32>
 
     /// The target box for each anchor box, shape [batchSize, numAnchors, 4].
     ///
-    /// Boxes with target class -1 are to be ignored.
-    //
-    // TODO: How is this encoded?
+    /// Boxes with target class -1 are to be ignored. The order is the same as for clsLabels.
     public var boxLabels: Tensor<Float>
 }
 
-/// For use with the new standard Collatable on 0.9.
+/// For use with the Epochs toolkit, examples have to be Collatable.
 extension LabeledSsdExample: Collatable {
     public init<BatchSamples: Collection>(collating: BatchSamples)
     where BatchSamples.Element == Self {
@@ -51,34 +48,37 @@ extension LabeledSsdExample: Collatable {
 	self.boxLabels = Tensor<Float>(collating: collating.map { x in x.boxLabels } )
     }
 }
-/// For use with Batcher and its old _Colltable.
-extension LabeledSsdExample: _Collatable {
-    public init(oldCollating: [Self]) {
-	self.init(collating: oldCollating)
-    }
-}
 
-/// A dataset for object detection with SSD.
-public protocol ObjectDetectionBatchers {
-    associatedtype C: Collection  where C.Index == Int  // Batcher's requirement.
+/// A dataset with training and test splits for object detection with SSD.
+public protocol SsdDatasets {
     init()
-    var training: Batcher<C> { get }
-    var test: Batcher<C> { get }
+    associatedtype TrainingCollection: Collection where TrainingCollection.Element == LabeledSsdExample
+    associatedtype Entropy: RandomNumberGenerator
+    associatedtype SsdTrainingEpochs = TrainingEpochs<TrainingCollection, Entropy>
+    associatedtype SsdTestSequence: Sequence
+    where SsdTestSequence.Element: Sequence, SsdTestSequence.Element.Element == LabeledSsdExample
+    var training: SsdTrainingEpochs { get }
+    var test: SsdTestSequence { get }
 }
 
 let batchSize = 8
+let numDemoExamples = 16
 
 /// A dummy dataset that is merely good enough to compile.
-struct DummyBatchers: ObjectDetectionBatchers {
+struct DummySsdDatasets : SsdDatasets {
+    typealias TrainingCollection = [LabeledSsdExample]
+    typealias Entropy = SystemRandomNumberGenerator
+    typealias SsdTrainingEpochs = TrainingEpochs<TrainingCollection, Entropy>
+    typealias SsdTestSequence = Slices<[LabeledSsdExample]>
     /// The training part of this dataset.
-    public let training: Batcher<[LabeledSsdExample]>
+    public let training: SsdTrainingEpochs
 
     /// The test part of this dataset.
-    public let test: Batcher<[LabeledSsdExample]>
+    public let test: SsdTestSequence
 
     init() {
 	var basicDataset = [LabeledSsdExample]()
-	for _ in 0..<3 {
+	for _ in 0..<numDemoExamples {
 	    basicDataset += [
 		LabeledSsdExample(
                     image: Tensor<Float>(repeating: -0.123, shape: [300, 300, 3]),
@@ -86,18 +86,21 @@ struct DummyBatchers: ObjectDetectionBatchers {
 		    boxLabels: Tensor<Float>(repeating: 0.1, shape: [8732, 4]))
 	    ]
 	}
-        training = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1, shuffle: true)
-        test = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1)
+        training = TrainingEpochs(samples: basicDataset, batchSize: batchSize)
+        test = basicDataset.inBatches(of: batchSize)
     }
 }
 
 // A dummy dataset that goes through label conversion.
-struct BatchersFromDummyLabels: ObjectDetectionBatchers {
+struct DatasetsFromDummyLabels : SsdDatasets {
+    typealias TrainingCollection = [LabeledSsdExample]
+    typealias Entropy = SystemRandomNumberGenerator
+    typealias SsdTrainingEpochs = TrainingEpochs<TrainingCollection, Entropy>
+    typealias SsdTestSequence = Slices<[LabeledSsdExample]>
     /// The training part of this dataset.
-    public let training: Batcher<[LabeledSsdExample]>
-
+    public let training: SsdTrainingEpochs
     /// The test part of this dataset.
-    public let test: Batcher<[LabeledSsdExample]>
+    public let test: SsdTestSequence
 
     init() {
 	let dummyImage = Tensor<Float>(repeating: -0.123, shape: [300, 300, 3])
@@ -115,25 +118,29 @@ struct BatchersFromDummyLabels: ObjectDetectionBatchers {
 	]
 	let (dummyClsLabels, dummyBoxLabels) = getSsdTargets(inputBoxes: dummyLabeledObjectes)
 	var basicDataset = [LabeledSsdExample]()
-	for _ in 0..<3 {
+	for _ in 0..<numDemoExamples {
 	    basicDataset += [
 		LabeledSsdExample(
                     image: dummyImage,
 		    clsLabels: dummyClsLabels,
 		    boxLabels: dummyBoxLabels)
 	    ]
-	}
-        training = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1, shuffle: true)
-        test = Batcher(on: basicDataset, batchSize: batchSize, numWorkers: 1)
+        }
+        training = TrainingEpochs(samples: basicDataset, batchSize: batchSize)
+        test = basicDataset.inBatches(of: batchSize)
     }
 }
 
-struct CocoObjectDetectionBatchers: ObjectDetectionBatchers {
+// The real COCO dataset.
+struct CocoObjectDetectionDatasets : SsdDatasets {
+    typealias TrainingCollection = LazyMapSequence<Array<ObjectDetectionExample>, LabeledSsdExample>
+    typealias Entropy = SystemRandomNumberGenerator
+    typealias SsdTrainingEpochs = TrainingEpochs<TrainingCollection, Entropy>
+    typealias SsdTestSequence = Slices<[LabeledSsdExample]>
     /// The training part of this dataset.
-    public let training: Batcher<[LabeledSsdExample]>
-
+    public let training: SsdTrainingEpochs
     /// The test part of this dataset.
-    public let test: Batcher<[LabeledSsdExample]>
+    public let test: SsdTestSequence
 
     init() {
 	let includeMasks = false
@@ -145,30 +152,19 @@ struct CocoObjectDetectionBatchers: ObjectDetectionBatchers {
             batchSize: batchSizeLoad,
   	    numWorkers: numWorkersLoad)
 	// *** BAD BAD BAD *** Until this is fast enough, we make use of tiny bits of data.
-	let testData = convertToSsd(Array(rawTestData[0..<16]))
-	let trainingData = convertToSsd(Array(rawTestData[16..<48]))
-        self.test = Batcher(on: testData, batchSize: batchSize, numWorkers: 1)
-	//let trainingData = convertToSsd(Array(loadCOCOExamples(
-        //    from: COCOVariant.loadTrain(downloadImages: true),
-        //    includeMasks: includeMasks,
-        //    batchSize: batchSizeLoad,
-        //    numWorkers: numWorkersLoad)[0..<limit]))
-        self.training = Batcher(
-	    on: trainingData,
-	    batchSize: batchSize, numWorkers: 1, shuffle: true)
+	self.test = Array(rawTestData[0..<numDemoExamples]).lazy.map(
+	    convertExampleToSsd).inBatches(of: batchSize)
+	let trainingData = Array(rawTestData[numDemoExamples..<2*numDemoExamples]).lazy.map(
+	    convertExampleToSsd)
+        self.training = TrainingEpochs(samples: trainingData, batchSize: batchSize)
     }
 }
 
-func convertToSsd(_ examples: [ObjectDetectionExample]) -> [LabeledSsdExample] {
-       // TOOD: Before 0.9, I could use .concurrentMap(nthreads: 8) from batcher backend here.
-       return examples.map { example in
-            let image = resize(images:example.image.tensor()!, size:(300, 300))
-	    let (clsLabels, boxLabels) = getSsdTargets(inputBoxes: example.objects)
-	    return LabeledSsdExample(
-                image: image,
-		clsLabels: clsLabels,
-		boxLabels: boxLabels)
-	}
+func convertExampleToSsd(_ example: ObjectDetectionExample) -> LabeledSsdExample {
+    // TODO: Add random perturbations for dataset augmentation.
+    let image = resize(images:example.image.tensor()!, size:(300, 300))  // Trigger lazy load.
+    let (clsLabels, boxLabels) = getSsdTargets(inputBoxes: example.objects)
+    return LabeledSsdExample(image: image, clsLabels: clsLabels, boxLabels: boxLabels)
 }
 
 /// The output of SSDModel.
@@ -177,12 +173,12 @@ func convertToSsd(_ examples: [ObjectDetectionExample]) -> [LabeledSsdExample] {
 public struct SSDModelOutput: Differentiable {
     /// The logits for each box, shape [batchSize, numAnchors, numClasses].
     //
-    // TODO: How are the boxes ordered?
+    // The anchors are enumerated in the same order dcoumented for LabeledSsdExample.clsLabels.
     var clsOutputs: Tensor<Float>
 
     /// The changes to each anchor box, shape [batchSize, numAnchors, 4].
     //
-    // TODO: How are the boxes ordered?
+    // The anchors are enumerated in the same order coumented for LabeledSsdExample.boxLabels.
     var boxOutputs: Tensor<Float>
 }
 
@@ -484,13 +480,16 @@ func detectionLoss(
 let optimizer = SGD(for: model, learningRate: 0.001, momentum: 0.9)
 
 print("Setting up data...")
-let batchers = CocoObjectDetectionBatchers()
+//let datasets = DummySsdDatasets()
+//let datasets = DatasetsFromDummyLabels()
+let datasets = CocoObjectDetectionDatasets()
 
 print("Starting training...")
-for epoch in 1...5 {
+for epoch in datasets.training.prefix(3) {
     Context.local.learningPhase = .training
     var lastLoss: Float = 0
-    for batch in batchers.training.sequenced() {
+    for batchSamples in epoch {
+	let batch = batchSamples.collated
         let (image, boxLabels, clsLabels) = (batch.image, batch.boxLabels, batch.clsLabels)
         let (loss, grad) = valueWithGradient(at: model) { model -> Tensor<Float> in
             let modelOutput = model(image)
@@ -501,7 +500,7 @@ for epoch in 1...5 {
         lastLoss = loss.scalar!
         optimizer.update(&model, along: grad)
     }
-    print("Completed epoch \(epoch), loss = \(lastLoss)")
+    print("Completed an epoch, loss = \(lastLoss)")
 }
 
 print("Done.")
