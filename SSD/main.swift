@@ -59,6 +59,7 @@ public protocol SsdDatasets {
     where SsdTestSequence.Element: Sequence, SsdTestSequence.Element.Element == LabeledSsdExample
     var training: SsdTrainingEpochs { get }
     var test: SsdTestSequence { get }
+    var numClasses: Int { get }
 }
 
 let batchSize = 8
@@ -75,6 +76,8 @@ struct DummySsdDatasets : SsdDatasets {
 
     /// The test part of this dataset.
     public let test: SsdTestSequence
+
+    public let numClasses = 10
 
     init() {
 	var basicDataset = [LabeledSsdExample]()
@@ -101,6 +104,7 @@ struct DatasetsFromDummyLabels : SsdDatasets {
     public let training: SsdTrainingEpochs
     /// The test part of this dataset.
     public let test: SsdTestSequence
+    public let numClasses = 10
 
     init() {
 	let dummyImage = Tensor<Float>(repeating: -0.123, shape: [300, 300, 3])
@@ -108,12 +112,12 @@ struct DatasetsFromDummyLabels : SsdDatasets {
 	    LabeledObject(
 		xMin: 0.3, xMax: 0.5, 
 		yMin: 0.4, yMax: 0.6, 
-		className: "cat", classId: 42,
+		className: "cat", classId: 4,
 		isCrowd: 0, area: 0.04, maskRLE: nil),
 	    LabeledObject(
 		xMin: 0.6, xMax: 0.7, 
 		yMin: 0.6, yMax: 0.8, 
-		className: "dog", classId: 105,
+		className: "dog", classId: 7,
 		isCrowd: 0, area: 0.02, maskRLE: nil)
 	]
 	let (dummyClsLabels, dummyBoxLabels) = getSsdTargets(inputBoxes: dummyLabeledObjectes)
@@ -141,13 +145,16 @@ struct CocoObjectDetectionDatasets : SsdDatasets {
     public let training: SsdTrainingEpochs
     /// The test part of this dataset.
     public let test: SsdTestSequence
+    public let numClasses: Int
 
     init() {
 	let includeMasks = false
 	let batchSizeLoad = 16
 	let numWorkersLoad = 8
+	let cocoVariant = COCOVariant.loadVal(downloadImages: true)
+	self.numClasses = cocoVariant.categories.count
 	let rawTestData = loadCOCOExamples(
-            from: COCOVariant.loadVal(downloadImages: true),
+            from: cocoVariant,
             includeMasks: includeMasks,
             batchSize: batchSizeLoad,
   	    numWorkers: numWorkersLoad)
@@ -434,9 +441,6 @@ struct SSDModel: Layer {
     }
 }
 
-// TODO: Warm-start from a backbone checkpoint.
-var model = SSDModel(numClasses: 10)
-
 @differentiable(wrt: (clsOutputs, boxOutputs))
 func detectionLoss(
     clsOutputs: Tensor<Float>,
@@ -476,13 +480,16 @@ func detectionLoss(
     return clsLoss + boxLoss
 }
 
-// TODO: Add learning rate schedule (ramp-up and decay).
-let optimizer = SGD(for: model, learningRate: 0.001, momentum: 0.9)
-
 print("Setting up data...")
 //let datasets = DummySsdDatasets()
 //let datasets = DatasetsFromDummyLabels()
 let datasets = CocoObjectDetectionDatasets()
+
+print("Setting up model...")
+// TODO: Warm-start from a backbone checkpoint.
+var model = SSDModel(numClasses: datasets.numClasses)
+// TODO: Add learning rate schedule (ramp-up and decay).
+let optimizer = SGD(for: model, learningRate: 0.001, momentum: 0.9)
 
 print("Starting training...")
 for epoch in datasets.training.prefix(3) {
