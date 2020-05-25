@@ -26,15 +26,15 @@ public struct LabeledSsdExample {
 
     /// The target class for each anchor box, shape [batchSize, numAnchors].
     ///
-    /// Most boxes are unused and receive label -1.
-    /// For the others, the value is in range 0..<numClasses.
+    /// Most boxes are unused and receive label 0 (background).
+    /// For the others, the value is in range 1..<numClasses.
     //
     // TODO: Document the order achieved by getSsdTargets().
     public var clsLabels: Tensor<Int32>
 
     /// The target box for each anchor box, shape [batchSize, numAnchors, 4].
     ///
-    /// Boxes with target class -1 are to be ignored. The order is the same as for clsLabels.
+    /// Boxes with target class 0 are to be ignored. The order is the same as for clsLabels.
     public var boxLabels: Tensor<Float>
 }
 
@@ -59,6 +59,8 @@ public protocol SsdDatasets {
     where SsdTestSequence.Element: Sequence, SsdTestSequence.Element.Element == LabeledSsdExample
     var training: SsdTrainingEpochs { get }
     var test: SsdTestSequence { get }
+    // The number of classes, comprising class 0 for background and object classes
+    // 1..<numClasses.
     var numClasses: Int { get }
 }
 
@@ -152,7 +154,8 @@ struct CocoObjectDetectionDatasets : SsdDatasets {
 	let batchSizeLoad = 16
 	let numWorkersLoad = 8
 	let cocoVariant = COCOVariant.loadVal(downloadImages: true)
-	self.numClasses = cocoVariant.categories.count
+	assert(cocoVariant.categories[0] == nil, "CategoryId 0 must be reserved for empty boxes.")
+	self.numClasses = cocoVariant.categories.count + 1
 	let rawTestData = loadCOCOExamples(
             from: cocoVariant,
             includeMasks: includeMasks,
@@ -168,7 +171,7 @@ struct CocoObjectDetectionDatasets : SsdDatasets {
 }
 
 func convertExampleToSsd(_ example: ObjectDetectionExample) -> LabeledSsdExample {
-    // TODO: Add random perturbations for dataset augmentation.
+    // TODO: Add random perturbations (incl smart cropping) for dataset augmentation.
     let image = resize(images:example.image.tensor()!, size:(300, 300))  // Trigger lazy load.
     let (clsLabels, boxLabels) = getSsdTargets(inputBoxes: example.objects)
     return LabeledSsdExample(image: image, clsLabels: clsLabels, boxLabels: boxLabels)
@@ -448,34 +451,46 @@ func detectionLoss(
     clsLabels: Tensor<Int32>,
     boxLabels: Tensor<Float>
 ) -> Tensor<Float> {
+    let batchSize = clsOutputs.shape[0]
+    let numAnchors = clsOutputs.shape[1]
     let numClasses = clsOutputs.shape[2]
 
-    // Boxes with negative clsLabels are masked out when aggregting the losses.
-    // But before that, they need a valid class label to not crash its one-hot encoding.
-    let mask: Tensor<Bool> = clsLabels .>= Tensor<Int32>(0)
+    // Mask has shape [batchSize, numAnchors]. It hides unmatched anchors (target class: background).
+    let mask: Tensor<Bool> = clsLabels .> Tensor<Int32>(0)
     assert(mask.rank == 2)
-    let clsLabelsValid = Tensor<Int32>(zerosLike: clsLabels).replacing(with: clsLabels, where: mask)
-
+    let maskFloat = Tensor<Float>(mask)
+    var numMatchedBoxes = maskFloat.sum(alongAxes: 1)
+    assert(numMatchedBoxes.rank == 2)
+    // TODO: Drop training examples with zero boxes, then drop this clipping.
+    numMatchedBoxes = max(numMatchedBoxes, Tensor<Float>(1.0))
+    let maskScaled = maskFloat / numMatchedBoxes
+    
     // softmaxCrossEntropy() requires logits of rank 2, so we collapse the batchSize and numAnchors
     // dimensions.
+    // TODO: Hard negative mining: Expand mask to add k unmatched anchors (k = 3 * num matched)
+    // with the top crossentropy vs target class class 0 (background).
+    let batchSizeFloat = Tensor<Float>(Float(batchSize))
+    let weights1d = (maskScaled / batchSizeFloat).reshaped(to:[batchSize * numAnchors])
     @differentiable
-    func maskedMean1d(_ value: Tensor<Float>) -> Tensor<Float> {
+    func reduceClsLoss(_ value: Tensor<Float>) -> Tensor<Float> {
 	assert(value.rank == 1)
-	return (value * Tensor<Float>(mask.reshaped(to:[-1]))).mean()
+	return (value * weights1d).sum()
     }
     let clsLoss = softmaxCrossEntropy(
-	logits: clsOutputs.reshaped(to:[-1, numClasses]),
-	labels: clsLabelsValid.reshaped(to:[-1]),
-	reduction: maskedMean1d)
+	logits: clsOutputs.reshaped(to:[batchSize * numAnchors, numClasses]),
+	labels: clsLabels.reshaped(to:[batchSize * numAnchors]),
+	reduction: reduceClsLoss)
 
     // The l2Loss() of the boxes operates on shape [batchSize, numAnchors, 4], which requires
     // broadcasting the mask.
+    // TODO: replace L2 by Huber loss.
     @differentiable
-    func maskedMean3d(_ value: Tensor<Float>) -> Tensor<Float> {
+    func reduceBoxLoss(_ value: Tensor<Float>) -> Tensor<Float> {
 	assert(value.rank == 3)
-	return (value * Tensor<Float>(mask.expandingShape(at:2))).mean()
+	return (value * Tensor<Float>(maskScaled.expandingShape(at:2))
+          ).sum(alongAxes:1, 2).mean()
     }
-    let boxLoss = l2Loss(predicted: boxOutputs, expected: boxLabels, reduction: maskedMean3d)
+    let boxLoss = l2Loss(predicted: boxOutputs, expected: boxLabels, reduction: reduceBoxLoss)
 
     return clsLoss + boxLoss
 }
@@ -500,6 +515,7 @@ for epoch in datasets.training.prefix(3) {
         let (image, boxLabels, clsLabels) = (batch.image, batch.boxLabels, batch.clsLabels)
         let (loss, grad) = valueWithGradient(at: model) { model -> Tensor<Float> in
             let modelOutput = model(image)
+	    // TODO: add L2 regularization of weights
             return detectionLoss(
                 clsOutputs: modelOutput.clsOutputs, boxOutputs: modelOutput.boxOutputs,
                 clsLabels: clsLabels, boxLabels: boxLabels)

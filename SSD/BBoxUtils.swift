@@ -22,11 +22,10 @@ import TensorFlow
 ///
 /// - Returns:
 ///     - clsLabels: A Tensor<Int32> of shape [numAnchors, 1] with the prediction targets for each
-///       anchor box. The target is either -1 to not predict this box or a valid classId (0, 1, ...).
+///       anchor box. The target is 0 ("background"), or a real class id starting at 1.
 ///     - boxLabels: A Tensor<Int32> of shape [numAnchors, 4] with the prediction target
-///       (ty, tx, th, tw) of the shape of each anchor box. If the anchor box's class target is -1,
-///       this is zeroed out. For a box with a valid classId, this is the Faster R-CNN box encoding
-///       given by the formulas
+///       (ty, tx, th, tw) of the shape of each anchor box. If the anchor box's class target is 0,
+///       this is zeroed out. Otherwise, this is the Faster R-CNN box encoding given by the formulas
 ///           ty = (y - ya) / ha / scaleXY
 ///           tx = (x - xa) / wa / scaleXY
 ///           th = log(h / ha) / scaleHW
@@ -48,11 +47,13 @@ public func getSsdTargets(inputBoxes: [LabeledObject])
 	if j >= 0 {
 	    let anchor = anchors[i]
 	    let matchedInputBox = inputBoxes[j]
-	    clsLabels.append(Tensor<Int32>(Int32(matchedInputBox.classId)))
+	    let clsLabel = Int32(matchedInputBox.classId)
+	    assert(clsLabel > 0, "Invalid classId \(clsLabel) (zero is for background).")
+	    clsLabels.append(Tensor<Int32>(clsLabel))
 	    boxLabels.append(encodeSsdBoxTarget(targetBox: matchedInputBox, anchorBox: anchor))
 	    matchedCount += 1
 	} else {
-	    clsLabels.append(Tensor<Int32>(Int32(-1)))
+	    clsLabels.append(Tensor<Int32>(Int32(0)))
 	    boxLabels.append(Tensor<Float>(repeating: 0.0, shape: [4]))
 	}
     }
