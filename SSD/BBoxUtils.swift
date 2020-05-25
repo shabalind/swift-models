@@ -43,16 +43,23 @@ public func getSsdTargets(inputBoxes: [LabeledObject])
     let matches = match(anchors: anchors, targets: inputBoxes)
     var clsLabels = [Tensor<Int32>]()
     var boxLabels = [Tensor<Float>]()
+    var matchedCount = 0
     for (i, j) in matches.enumerated() {
 	if j >= 0 {
 	    let anchor = anchors[i]
 	    let matchedInputBox = inputBoxes[j]
 	    clsLabels.append(Tensor<Int32>(Int32(matchedInputBox.classId)))
 	    boxLabels.append(encodeSsdBoxTarget(targetBox: matchedInputBox, anchorBox: anchor))
+	    matchedCount += 1
 	} else {
-	    clsLabels.append(Tensor<Int32>(Int32(1)))  // TODO: -1
+	    clsLabels.append(Tensor<Int32>(Int32(-1)))
 	    boxLabels.append(Tensor<Float>(repeating: 0.0, shape: [4]))
 	}
+    }
+    if inputBoxes.count == 0 {
+	print("#### WEIRD: zero inputBoxes")
+    } else if matchedCount == 0 {
+	print("#### WEIRD: zero matches for \(inputBoxes.count) inputBoxes: \(inputBoxes)")
     }
     return (Tensor<Int32>(stacking: clsLabels), Tensor<Float>(stacking: boxLabels))
 }
@@ -103,8 +110,8 @@ func getDefaultBoxes() -> [Box] {
     let fk = SsdConstants.steps.map { SsdConstants.imageSize / $0 }
     var defaultBoxes = [Box]()
     for (idx, featureSize) in SsdConstants.featureSizes.enumerated() {
-	let sk1 = Float(SsdConstants.scales[idx] / SsdConstants.imageSize)  // This level.
-	let sk2 = Float(SsdConstants.scales[idx+1] / SsdConstants.imageSize)  // One level up.
+	let sk1 = Float(SsdConstants.scales[idx]) / Float(SsdConstants.imageSize)  // This level.
+	let sk2 = Float(SsdConstants.scales[idx+1]) / Float(SsdConstants.imageSize)  // One level up.
 	let sk3 = (sk1 * sk2).squareRoot()  // "Half a level" up (geometric mean).
 	var allSizes = [(sk1, sk1), (sk3, sk3)]
 	
@@ -187,7 +194,8 @@ func intersectionOverUnion(_ a: ConstantBox, _ b: ConstantBox) -> Float {
     if yMin >= yMax { return 0.0 }
     let intersection = (xMax - xMin) * (yMax - yMin)
     // Compute the union.
-    let union = (a.xMax - a.xMin) * (a.yMax - a.yMin) + (b.xMax - b.xMin) * (b.yMax - b.yMin)
+    let union = ((a.xMax - a.xMin) * (a.yMax - a.yMin) + (b.xMax - b.xMin) * (b.yMax - b.yMin)
+                 - intersection)
     if union <= 0.0 { return 0.0 }  // Avoid corner cases.
     return intersection / union
 }
