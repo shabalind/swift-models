@@ -165,7 +165,7 @@ where
   }
 }
 
-func MicrobenchSuite<Model>(
+func LayerSuite<Model>(
   model modelType: Model.Type
 ) -> BenchmarkSuite
 where
@@ -198,6 +198,6 @@ where
   }
 }
 
-let LeNetSuite = MicrobenchSuite(model: LeNet.self)
-let ResNet50Suite = MicrobenchSuite(model: ResNet50.self)
-let ResNet56Suite = MicrobenchSuite(model: ResNet56.self)
+let LeNetSuite = LayerSuite(model: LeNet.self)
+let ResNet50Suite = LayerSuite(model: ResNet50.self)
+let ResNet56Suite = LayerSuite(model: ResNet56.self)
