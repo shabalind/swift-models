@@ -55,14 +55,14 @@ where
     model.move(to: device)
     let (images, _) = makeSyntheticBatch(model: modelType, batchSize: batchSize, device: device)
 
-    var shape = TensorShape([])
+    var sink = TensorShape([])
 
     while true {
       do {
         try state.measure {
           let result = model(images)
-          // Force materialization of the result.
-          shape = result.shape
+          // Force materialization of the lazy results.
+          sink = result.shape
           LazyTensorBarrier()
         }
       } catch {
@@ -78,7 +78,7 @@ where
     // Control-flow never gets here, but this removes the warning 
     // about shape being never used.
     // being never used.
-    fatalError("unrechable \(shape)")
+    fatalError("unrechable \(sink)")
   }
 }
 
@@ -96,13 +96,18 @@ where
     model.move(to: device)
     let (images, labels) = makeSyntheticBatch(model: modelType, batchSize: batchSize, device: device)
 
+    var sink: Model.TangentVector = Model.TangentVector.zero
+    sink.move(to: device)
+
     while true {
       do {
         try state.measure {
-          let _ = TensorFlow.gradient(at: model) { model -> Tensor<Float> in
+          let result = TensorFlow.gradient(at: model) { model -> Tensor<Float> in
             let logits = model(images)
             return softmaxCrossEntropy(logits: logits, labels: labels)
           }
+          // Force materialization of the lazy results.
+          sink += result
           LazyTensorBarrier()
         }
       } catch {
@@ -114,6 +119,11 @@ where
         throw error
       }
     }
+
+    // Control-flow never gets here, but this removes the warning 
+    // about shape being never used.
+    // being never used.
+    fatalError("unrechable \(sink)")
   }
 }
 
