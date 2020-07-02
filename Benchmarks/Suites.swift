@@ -13,7 +13,9 @@
 // limitations under the License.
 
 let suites = [
+  LeNetSuite,
   LeNetMNIST,
+  ResNet56Suite,
   ResNetCIFAR10,
   ResNetImageNet,
   WordSegScore,
