@@ -15,6 +15,7 @@
 let suites = [
   LeNetSuite,
   LeNetMNIST,
+  ResNet50Suite,
   ResNet56Suite,
   ResNetCIFAR10,
   ResNetImageNet,

@@ -57,8 +57,6 @@ where
 
     var shape = TensorShape([])
 
-    PrintX10Metrics()
-
     while true {
       do {
         try state.measure {
@@ -84,6 +82,79 @@ where
   }
 }
 
+func gradientBenchmark<Model>(
+  model modelType: Model.Type
+) -> ((inout BenchmarkState) throws -> Void)
+where
+  Model: ImageClassificationModel, Model.TangentVector.VectorSpaceScalar == Float
+{
+  return { state in
+    let settings = state.settings
+    let device = settings.device
+    let batchSize = settings.batchSize!
+    var model = Model()
+    model.move(to: device)
+    let (images, labels) = makeSyntheticBatch(model: modelType, batchSize: batchSize, device: device)
+
+    while true {
+      do {
+        try state.measure {
+          let _ = TensorFlow.gradient(at: model) { model -> Tensor<Float> in
+            let logits = model(images)
+            return softmaxCrossEntropy(logits: logits, labels: labels)
+          }
+          LazyTensorBarrier()
+        }
+      } catch {
+        if settings.backend == .x10 {
+          // A synchronous barrier is needed for X10 to ensure all execution completes
+          // before tearing down the model.
+          LazyTensorBarrier(wait: true)
+        }
+        throw error
+      }
+    }
+  }
+}
+
+func updateBenchmark<Model>(
+  model modelType: Model.Type
+) -> ((inout BenchmarkState) throws -> Void)
+where
+  Model: ImageClassificationModel, Model.TangentVector.VectorSpaceScalar == Float
+{
+  return { state in
+    let settings = state.settings
+    let device = settings.device
+    let batchSize = settings.batchSize!
+    var model = Model()
+    model.move(to: device)
+    var optimizer = SGD(for: model, learningRate: 0.1)
+    optimizer = SGD(copying: optimizer, to: device)
+    let (images, labels) = makeSyntheticBatch(model: modelType, batchSize: batchSize, device: device)
+
+    while true {
+      do {
+        try state.measure {
+          let 𝛁model = TensorFlow.gradient(at: model) { model -> Tensor<Float> in
+            let logits = model(images)
+            return softmaxCrossEntropy(logits: logits, labels: labels)
+          }
+          optimizer.update(&model, along: 𝛁model)
+          LazyTensorBarrier()
+        }
+      } catch {
+        if settings.backend == .x10 {
+          // A synchronous barrier is needed for X10 to ensure all execution completes
+          // before tearing down the model.
+          LazyTensorBarrier(wait: true)
+        }
+        throw error
+      }
+    }
+  }
+}
+
 func MicrobenchSuite<Model>(
   model modelType: Model.Type
 ) -> BenchmarkSuite
@@ -102,10 +173,21 @@ where
           "forward_b\(batchSize)_\(backend.value)",
           settings: backend, BatchSize(batchSize),
           function: forwardBenchmark(model: modelType))
+
+        suite.benchmark(
+          "gradient_b\(batchSize)_\(backend.value)",
+          settings: backend, BatchSize(batchSize),
+          function: gradientBenchmark(model: modelType))
+
+        suite.benchmark(
+          "update_b\(batchSize)_\(backend.value)",
+          settings: backend, BatchSize(batchSize),
+          function: updateBenchmark(model: modelType))
       }
     }
   }
 }
 
 let LeNetSuite = MicrobenchSuite(model: LeNet.self)
+let ResNet50Suite = MicrobenchSuite(model: ResNet50.self)
 let ResNet56Suite = MicrobenchSuite(model: ResNet56.self)
