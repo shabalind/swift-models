@@ -15,23 +15,23 @@
 import ImageClassificationModels
 
 let ResNetSuites = [
-  //
-  // Cifar input dimensions. 
-  //
-  makeLayerSuite(
-    name: "ResNet18",
-    inputDimensions: cifarInput,
-    outputDimensions: cifarOutput
-  ) {
-    ResNet(classCount: 10, depth: .resNet18, downsamplingInFirstStage: true)
-  },
-  makeLayerSuite(
-    name: "ResNet34",
-    inputDimensions: cifarInput,
-    outputDimensions: cifarOutput
-  ) {
-    ResNet(classCount: 10, depth: .resNet34, downsamplingInFirstStage: true)
-  },
+  // //
+  // // Cifar input dimensions. 
+  // //
+  // makeLayerSuite(
+  //   name: "ResNet18",
+  //   inputDimensions: cifarInput,
+  //   outputDimensions: cifarOutput
+  // ) {
+  //   ResNet(classCount: 10, depth: .resNet18, downsamplingInFirstStage: true)
+  // },
+  // makeLayerSuite(
+  //   name: "ResNet34",
+  //   inputDimensions: cifarInput,
+  //   outputDimensions: cifarOutput
+  // ) {
+  //   ResNet(classCount: 10, depth: .resNet34, downsamplingInFirstStage: true)
+  // },
   makeLayerSuite(
     name: "ResNet50",
     inputDimensions: cifarInput,
@@ -39,44 +39,44 @@ let ResNetSuites = [
   ) {
     ResNet(classCount: 10, depth: .resNet50, downsamplingInFirstStage: true, useLaterStride: false)
   },
-  makeLayerSuite(
-    name: "ResNet56",
-    inputDimensions: cifarInput,
-    outputDimensions: cifarOutput
-  ) {
-    ResNet(classCount: 10, depth: .resNet56, downsamplingInFirstStage: true, useLaterStride: false)
-  },
-  makeLayerSuite(
-    name: "ResNet101",
-    inputDimensions: cifarInput,
-    outputDimensions: cifarOutput
-  ) {
-    ResNet(classCount: 10, depth: .resNet101, downsamplingInFirstStage: true)
-  },
-  makeLayerSuite(
-    name: "ResNet152",
-    inputDimensions: cifarInput,
-    outputDimensions: cifarOutput
-  ) {
-    ResNet(classCount: 10, depth: .resNet152, downsamplingInFirstStage: true)
-  },
-  //
-  // ImageNet dimensions.
-  //
-  makeLayerSuite(
-    name: "ResNet18",
-    inputDimensions: imageNetInput,
-    outputDimensions: imageNetOutput
-  ) {
-    ResNet(classCount: 1000, depth: .resNet18)
-  },
-  makeLayerSuite(
-    name: "ResNet34",
-    inputDimensions: imageNetInput,
-    outputDimensions: imageNetOutput
-  ) {
-    ResNet(classCount: 1000, depth: .resNet34)
-  },
+  // makeLayerSuite(
+  //   name: "ResNet56",
+  //   inputDimensions: cifarInput,
+  //   outputDimensions: cifarOutput
+  // ) {
+  //   ResNet(classCount: 10, depth: .resNet56, downsamplingInFirstStage: true, useLaterStride: false)
+  // },
+  // makeLayerSuite(
+  //   name: "ResNet101",
+  //   inputDimensions: cifarInput,
+  //   outputDimensions: cifarOutput
+  // ) {
+  //   ResNet(classCount: 10, depth: .resNet101, downsamplingInFirstStage: true)
+  // },
+  // makeLayerSuite(
+  //   name: "ResNet152",
+  //   inputDimensions: cifarInput,
+  //   outputDimensions: cifarOutput
+  // ) {
+  //   ResNet(classCount: 10, depth: .resNet152, downsamplingInFirstStage: true)
+  // },
+  // //
+  // // ImageNet dimensions.
+  // //
+  // makeLayerSuite(
+  //   name: "ResNet18",
+  //   inputDimensions: imageNetInput,
+  //   outputDimensions: imageNetOutput
+  // ) {
+  //   ResNet(classCount: 1000, depth: .resNet18)
+  // },
+  // makeLayerSuite(
+  //   name: "ResNet34",
+  //   inputDimensions: imageNetInput,
+  //   outputDimensions: imageNetOutput
+  // ) {
+  //   ResNet(classCount: 1000, depth: .resNet34)
+  // },
   makeLayerSuite(
     name: "ResNet50",
     inputDimensions: imageNetInput,
@@ -84,25 +84,25 @@ let ResNetSuites = [
   ) {
     ResNet(classCount: 1000, depth: .resNet50, useLaterStride: false)
   },
-  makeLayerSuite(
-    name: "ResNet56",
-    inputDimensions: imageNetInput,
-    outputDimensions: imageNetOutput
-  ) {
-    ResNet(classCount: 1000, depth: .resNet56)
-  },
-  makeLayerSuite(
-    name: "ResNet101",
-    inputDimensions: imageNetInput,
-    outputDimensions: imageNetOutput
-  ) {
-    ResNet(classCount: 1000, depth: .resNet101)
-  },
-  makeLayerSuite(
-    name: "ResNet152",
-    inputDimensions: imageNetInput,
-    outputDimensions: imageNetOutput
-  ) {
-    ResNet(classCount: 1000, depth: .resNet152)
-  },
+  // makeLayerSuite(
+  //   name: "ResNet56",
+  //   inputDimensions: imageNetInput,
+  //   outputDimensions: imageNetOutput
+  // ) {
+  //   ResNet(classCount: 1000, depth: .resNet56)
+  // },
+  // makeLayerSuite(
+  //   name: "ResNet101",
+  //   inputDimensions: imageNetInput,
+  //   outputDimensions: imageNetOutput
+  // ) {
+  //   ResNet(classCount: 1000, depth: .resNet101)
+  // },
+  // makeLayerSuite(
+  //   name: "ResNet152",
+  //   inputDimensions: imageNetInput,
+  //   outputDimensions: imageNetOutput
+  // ) {
+  //   ResNet(classCount: 1000, depth: .resNet152)
+  // },
 ]

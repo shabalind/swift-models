@@ -14,16 +14,16 @@
 
 let layerSuites = Array(
   [
-    DenseNetSuites,
-    EfficientNetSuites,
-    LeNetSuites,
-    MobileNetV1Suites,
-    MobileNetV2Suites,
-    MobileNetV3Suites,
+    // DenseNetSuites,
+    // EfficientNetSuites,
+    // LeNetSuites,
+    // MobileNetV1Suites,
+    // MobileNetV2Suites,
+    // MobileNetV3Suites,
     ResNetSuites,
-    ResNetV2Suites,
-    ShuffleNetV2Suites,
-    SqueezeNetSuites,
-    VGGSuites,
-    WideResNetSuites,
+    // ResNetV2Suites,
+    // ShuffleNetV2Suites,
+    // SqueezeNetSuites,
+    // VGGSuites,
+    // WideResNetSuites,
   ].joined())

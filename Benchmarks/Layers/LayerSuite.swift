@@ -31,10 +31,11 @@ func makeRandomTensor(
   return tensor
 }
 
-func makeForwardBenchmark<CustomLayer>(
+func makeForwardBenchmark<CustomLayer, SinkType: Sink>(
   layer makeLayer: @escaping () -> CustomLayer,
   inputDimensions: [Int],
-  outputDimensions: [Int]
+  outputDimensions: [Int],
+  sink sinkType: SinkType.Type
 ) -> ((inout BenchmarkState) throws -> Void)
 where
   CustomLayer: Layer,
@@ -54,15 +55,12 @@ where
       dimensions: inputDimensions,
       device: device)
 
-    var sink: TensorShape = TensorShape([])
+    var sink = SinkType() 
 
     while true {
       do {
         try state.measure {
-          let result = layer(input)
-          // Force materialization of the lazy results.
-          sink = result.shape
-          LazyTensorBarrier()
+          sink.consume(tensor: layer(input))
         }
       } catch {
         if settings.backend == .x10 {
@@ -137,11 +135,95 @@ where
   }
 }
 
+protocol Sink {
+    init()
+    mutating func consume(tensor: Tensor<Float>)
+}
+
+struct NoSink: Sink {
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) {}
+} 
+
+struct BarrierSink: Sink {
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) { LazyTensorBarrier() }
+} 
+
+struct BarrierNoWaitSink: Sink {
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) { LazyTensorBarrier(wait: false) }
+}
+
+struct ShapeNoBarrierSink: Sink {
+    var shape: TensorShape? = nil
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) {
+        shape = tensor.shape
+    }
+} 
+
+struct ShapeBarrierSink: Sink {
+    var shape: TensorShape? = nil
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) {
+        shape = tensor.shape
+        LazyTensorBarrier()
+    }
+} 
+
+struct ShapeBarrierNoWaitSink: Sink {
+    var sink: TensorShape? = nil
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) {
+        sink = tensor.shape
+        LazyTensorBarrier(wait: false)
+    }
+} 
+
+struct AdditiveNoBarrierSink: Sink {
+    var sink: Tensor<Float>? = nil
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) {
+        if let value = sink {
+            sink = value + tensor
+        } else {
+            sink = tensor
+        }
+    }
+} 
+
+struct AdditiveBarrierSink: Sink {
+    var sink: Tensor<Float>? = nil
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) {
+        if let value = sink {
+            sink = value + tensor
+        } else {
+            sink = tensor
+        }
+        LazyTensorBarrier()
+    }
+} 
+
+struct AdditiveBarrierNoWaitSink: Sink {
+    var sink: Tensor<Float>? = nil
+    init() {}
+    mutating func consume(tensor: Tensor<Float>) {
+        if let value = sink {
+            sink = value + tensor
+        } else {
+            sink = tensor
+        }
+        LazyTensorBarrier(wait: false)
+    }
+} 
+
 func makeLayerSuite<CustomLayer>(
   name: String,
   inputDimensions inp: [Int],
   outputDimensions outp: [Int],
-  batchSizes: [Int] = [4],
+  batchSizes: [Int] = [1],
   backends: [Backend.Value] = [.eager, .x10],
   layer: @escaping () -> CustomLayer
 ) -> BenchmarkSuite
@@ -160,17 +242,90 @@ where
   ) { suite in
     for batchSize in batchSizes {
       for backend in backends {
+
+        if backend == .x10 { 
+
         suite.benchmark(
-          "forward_b\(batchSize)_\(backend)",
+          "forward_b\(batchSize)_\(backend)_none",
           settings: Backend(backend), BatchSize(batchSize),
-          function: makeForwardBenchmark(layer: layer, inputDimensions: inp, outputDimensions: outp)
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: NoSink.self)
         )
 
         suite.benchmark(
-          "forward_and_gradient_b\(batchSize)_\(backend)",
+          "forward_b\(batchSize)_\(backend)_barrierwait",
           settings: Backend(backend), BatchSize(batchSize),
-          function: makeGradientBenchmark(
-            layer: layer, inputDimensions: inp, outputDimensions: outp))
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: BarrierSink.self)
+        )
+
+        suite.benchmark(
+          "forward_b\(batchSize)_\(backend)_barriernowait",
+          settings: Backend(backend), BatchSize(batchSize),
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: BarrierNoWaitSink.self)
+        )
+
+        suite.benchmark(
+          "forward_b\(batchSize)_\(backend)_shapenobarrier",
+          settings: Backend(backend), BatchSize(batchSize),
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: ShapeNoBarrierSink.self)
+        )
+
+        suite.benchmark(
+          "forward_b\(batchSize)_\(backend)_shapebarrierwait",
+          settings: Backend(backend), BatchSize(batchSize),
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: ShapeBarrierSink.self)
+        )
+
+        suite.benchmark(
+          "forward_b\(batchSize)_\(backend)_shapebarriernowait",
+          settings: Backend(backend), BatchSize(batchSize),
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: ShapeBarrierNoWaitSink.self)
+        )
+
+        suite.benchmark(
+          "forward_b\(batchSize)_\(backend)_addbarrierwait",
+          settings: Backend(backend), BatchSize(batchSize),
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: AdditiveBarrierSink.self)
+        )
+
+        suite.benchmark(
+          "forward_b\(batchSize)_\(backend)_addbarriernowait",
+          settings: Backend(backend), BatchSize(batchSize),
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: AdditiveBarrierNoWaitSink.self)
+        )
+
+        } else if backend == .eager {
+
+        suite.benchmark(
+          "forward_b\(batchSize)_\(backend)",
+          settings: Backend(backend), BatchSize(batchSize),
+          function: makeForwardBenchmark(
+              layer: layer, inputDimensions: inp, outputDimensions: outp,
+              sink: NoSink.self)
+        )
+
+        }
+
+        // suite.benchmark(
+        //   "forward_and_gradient_b\(batchSize)_\(backend)",
+        //   settings: Backend(backend), BatchSize(batchSize),
+        //   function: makeGradientBenchmark(
+        //     layer: layer, inputDimensions: inp, outputDimensions: outp))
       }
     }
   }
